@@ -1,4 +1,4 @@
-import { decryptAscii, decryptUtf16 } from "./crypto";
+import { decryptAscii, decryptUtf16, rotateLeft } from "./crypto";
 
 class WzArchive {
     file: File;
@@ -43,30 +43,46 @@ class WzArchive {
         const view = await this.view(this.position, ++this.position);
         return view.getUint8(0);
     }
-    async i8(): Promise<number> {
-        const view = await this.view(this.position, ++this.position);
-        return view.getInt8(0);
-    }
     async u16(): Promise<number> {
         const view = await this.view(this.position, this.position += 2);
         return view.getUint16(0, true);
-    }
-    async i16(): Promise<number> {
-        const view = await this.view(this.position, this.position += 2);
-        return view.getInt16(0, true);
     }
     async u32(): Promise<number> {
         const view = await this.view(this.position, this.position += 4);
         return view.getUint32(0, true);
     }
+    async u64(): Promise<bigint> {
+        const view = await this.view(this.position, this.position += 8);
+        return view.getBigUint64(0, true);
+    }
+    async i8(): Promise<number> {
+        const view = await this.view(this.position, ++this.position);
+        return view.getInt8(0);
+    }
+    async i16(): Promise<number> {
+        const view = await this.view(this.position, this.position += 2);
+        return view.getInt16(0, true);
+    }
     async i32(): Promise<number> {
         const view = await this.view(this.position, this.position += 4);
         return view.getInt32(0, true);
     }
+    async i64(): Promise<bigint> {
+        const view = await this.view(this.position, this.position += 8);
+        return view.getBigInt64(0, true);
+    }
+    async f32(): Promise<number> {
+        const view = await this.view(this.position, this.position += 4);
+        return view.getFloat32(0, true);
+    }
+    async f64(): Promise<number> {
+        const view = await this.view(this.position, this.position += 8);
+        return view.getFloat64(0, true);
+    }
     async read(): Promise<number> {
         const view = await this.view(this.position, ++this.position + 4);
         const result = view.getUint8(0);
-        if (result == 0x80) {
+        if (result === 0x80) {
             this.position += 4;
             return view.getUint32(1, true);
         } else {
@@ -77,7 +93,7 @@ class WzArchive {
         const view = await this.view(this.position, ++this.position + 4);
         let length = view.getInt8(0);
         if (length < 0) {
-            if (length == 0x80) {
+            if (length === -0x80) {
                 this.position += 4;
                 length = view.getUint32(1, true);
             } else {
@@ -94,7 +110,7 @@ class WzArchive {
                 return decryptAscii(data);
             }
         } else if (length > 0) {
-            if (length == 0x7F) {
+            if (length === 0x7F) {
                 this.position += 4;
                 length = view.getUint32(1, true);
             }
@@ -111,7 +127,17 @@ class WzArchive {
         }
         return "";
     }
-    async serializeString(offset: boolean): Promise<string> {
+    async deserializeString(): Promise<string> {
+        const id = await this.u8();
+        if (id === 0x00 || id === 0x73) {
+             return this.deserializeStringInternal(false);
+        } else if (id === 0x01 || id === 0x1B) {
+            return this.deserializeStringInternal(true);
+        } else {
+            throw new Error(`Unknown string id ${id}`);
+        }
+    }
+    async deserializeStringInternal(offset: boolean): Promise<string> {
         if (offset) {
             const stringPosition = await this.u32();
             const originalPosition = this.position;
@@ -131,7 +157,7 @@ export abstract class WzCollection {
     constructor(archive: WzArchive) {
         this.archive = archive;
     }
-    async get(path: string) : Promise<unknown> {
+    async get(path: string): Promise<unknown> {
         const i = path.indexOf("/");
         const key = i >= 0 ? path.slice(0, i) : path;
         if (!key) {
@@ -143,15 +169,91 @@ export abstract class WzCollection {
     abstract getInternal(key: string, rest: string): Promise<unknown>;
 }
 
-export class WzImage extends WzCollection {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    override async getInternal(key: string, rest: string): Promise<unknown> {
-        throw new Error("Method not implemented.");
+export abstract class WzProperty extends WzCollection {
+    static async from(subArchive: WzArchive): Promise<WzProperty> {
+        const uol = await subArchive.deserializeString();
+        if (uol === "Property") {
+            const result = new WzList(subArchive);
+            await result.init();
+            return result;
+        } else {
+            throw new Error(`Unknown property UOL : ${uol}`);
+        }
     }
 }
 
-function rotl(i: number, n: number): number {
-    return (i << n) | (i >>> (32 - n));
+interface WzListItem {
+    position: number;
+}
+
+export class WzList extends WzProperty {
+    items: Map<string, unknown>;
+
+    constructor(archive: WzArchive) {
+        super(archive);
+        this.items = new Map<string, unknown>();
+    }
+    async init(): Promise<void> {
+        this.archive.position += 2; // reserved
+        const size = await this.archive.read();
+        for (let i = 0; i < size; i++) {
+            const name = await this.archive.deserializeString();
+            this.items.set(name, await this.deserialize());
+        }
+    }
+    async deserialize(): Promise<unknown> {
+        const vt = await this.archive.u8();
+        if (vt === 0) {
+            return null;
+        } else if (vt === 2 || vt === 16) {
+            return await this.archive.i16();
+        } else if (vt === 3) {
+            const val = await this.archive.i8();
+            return val === -0x80 ? await this.archive.i32() : val;
+        } else if (vt === 4) {
+            const val = await this.archive.i8();
+            return val === -0x80 ? await this.archive.f32() : val;
+        } else if (vt === 5) {
+            return await this.archive.f64();
+        } else if (vt === 8) {
+            return await this.archive.deserializeString();
+        } else if (vt === 9 || vt === 13) {
+            const size = await this.archive.u32();
+            const position = this.archive.position;
+            this.archive.position += size;
+            return { position: position } as WzListItem;
+        } else if (vt === 11) {
+            const val = await this.archive.u16();
+            return val ? true : false;
+        } else if (vt === 17 || vt === 18) {
+            return await this.archive.u16();
+        } else if (vt === 19) {
+            const val = await this.archive.u8();
+            return val === 0x80 ? await this.archive.u32() : val;
+        } else if (vt === 20) {
+            const val = await this.archive.i8();
+            return val === -0x80 ? await this.archive.i64() : BigInt(val);
+        } else if (vt === 21) {
+            const val = await this.archive.u8();
+            return val === 0x80 ? await this.archive.u64() : BigInt(val);
+        } else {
+            throw new Error(`Unknown variant type ${vt}`);
+        }
+    }
+    override async getInternal(key: string, rest: string): Promise<unknown> {
+        const item = this.items.get(key);
+        if (item === undefined) {
+            throw new Error(`No item with key : ${key}`);
+        }
+        if (typeof item !== "object") {
+            if (rest) {
+                throw new Error(`Cannot index list item with type : ${typeof item}`);
+            }
+            return item;
+        }
+        this.archive.position = (item as WzListItem).position;
+        return await WzProperty.from(this.archive);
+    }
 }
 
 interface WzPackageItem {
@@ -170,7 +272,7 @@ export class WzPackage extends WzCollection {
     }
     async init(key: string): Promise<void> {
         const header = await this.archive.view(0, 16);
-        if (header.getUint32(0, true) != 0x31474B50) {
+        if (header.getUint32(0, true) !== 0x31474B50) {
             throw new Error("PKG1 header missing");
         }
         const begin = header.getUint32(0xC, true);;
@@ -183,10 +285,10 @@ export class WzPackage extends WzCollection {
         this.key = hash;
         const computedHeader = (hash & 0xFF) ^ ((hash >> 8) & 0xFF) ^ ((hash >> 16) & 0xFF) ^ ((hash >> 24) & 0xFF);
         const versionHeader = await this.archive.u8();
-        if (versionHeader != computedHeader && versionHeader != (computedHeader ^ 0xFF)) {
+        if (versionHeader !== computedHeader && versionHeader !== (computedHeader ^ 0xFF)) {
             throw new Error("Version mismatch");
         }
-        await this.archive.serializeString(versionHeader == computedHeader);
+        await this.archive.deserializeStringInternal(versionHeader === computedHeader);
         await this.loadDirectory();
     }
     async loadPosition(): Promise<number> {
@@ -195,27 +297,26 @@ export class WzPackage extends WzCollection {
         result = ~(result - begin);
         result = result * this.key;
         result = result - 0x581C3F6D;
-        result = rotl(result, result & 0x1F);
+        result = rotateLeft(result, result & 0x1F);
         const position = await this.archive.u32();
         return (result ^ position) + (begin * 2);
     }
     async loadDirectory(): Promise<void> {
-        this.items.clear();
         const size = await this.archive.read();
         for (let i = 0; i < size; i++) {
             const id = await this.archive.u8();
-            const name = await this.archive.serializeString(id <= 2);
+            const name = await this.archive.deserializeStringInternal(id <= 2);
             await this.archive.read(); // size
             await this.archive.read(); // checksum
             this.items.set(name, {
                 position: await this.loadPosition(),
-                directory: (id & 1) != 0
+                directory: (id & 1) !== 0
             });
         }
     }
     override async getInternal(key: string, rest: string): Promise<unknown> {
         const item = this.items.get(key);
-        if (!item) {
+        if (item === undefined) {
             throw new Error(`No item with key : ${key}`);
         }
         if (item.directory) {
@@ -230,15 +331,17 @@ export class WzPackage extends WzCollection {
             }
         } else {
             const subArchive = this.archive.clone(item.position, item.position);
-            const image = new WzImage(subArchive);
+            const subProperty = await WzProperty.from(subArchive);
             if (rest) {
-                return await image.get(rest);
+                return await subProperty.get(rest);
             } else {
-                return image;
+                return subProperty;
             }
         }
     }
-    static from(file: File): WzPackage {
-        return new WzPackage(new WzArchive(file, 0, 0));
+    static async from(file: File, key: string): Promise<WzPackage> {
+        const result = new WzPackage(new WzArchive(file, 0, 0));
+        await result.init(key);
+        return result;
     }
 }

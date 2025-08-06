@@ -12,14 +12,14 @@ input.addEventListener("change", async (event) => {
 
     try {
         let start = performance.now();
-        const p = WzPackage.from(file);
-        await p.init("95");
+        const p = await WzPackage.from(file, "95");
         console.log(`Async execution took ${(performance.now() - start).toFixed(3)} ms`);
         console.log(p);
         start = performance.now();
-        console.log(await p.get("Map/Map1/120020272.img"));
+        console.log(await p.get("Map/Map1/120020272.img/info"));
         console.log(`Async execution took ${(performance.now() - start).toFixed(3)} ms`);
     } catch (error) {
+        console.log(error);
         output.textContent = `Error reading file: ${error}`;
     }
 });

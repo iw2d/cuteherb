@@ -49,3 +49,7 @@ export function decryptUtf16(data: Uint8Array): string {
     }
     return decoderUtf16.decode(result);
 }
+
+export function rotateLeft(i: number, n: number): number {
+    return (i << n) | (i >>> (32 - n));
+}
