@@ -4,21 +4,35 @@ class WzArchive {
     file: File;
     begin: number;
     position: number;
+    window: ArrayBuffer;
+    windowStart: number;
+    windowEnd: number;
 
     constructor(file: File, begin: number, position: number) {
         this.file = file;
         this.begin = begin;
         this.position = position;
+        this.window = new ArrayBuffer();
+        this.windowStart = 0;
+        this.windowEnd = 0;
     }
     clone(position: number): WzArchive {
         return new WzArchive(this.file, position, position);
     }
+    async slice(start: number, end: number): Promise<ArrayBuffer> {
+        if (this.windowStart > start || this.windowEnd < end) {
+            this.windowStart = start;
+            this.windowEnd = Math.max(end, start + 0x1000);
+            this.window = await this.file.slice(this.windowStart, this.windowEnd).arrayBuffer();
+        }
+        return this.window.slice(start - this.windowStart, end - this.windowStart);
+    }
     async array(start: number, end: number): Promise<Uint8Array> {
-        const slice = await this.file.slice(start, end).arrayBuffer();
+        const slice = await this.slice(start, end);
         return new Uint8Array(slice);
     }
     async view(start: number, end: number): Promise<DataView> {
-        const slice = await this.file.slice(start, end).arrayBuffer();
+        const slice = await this.slice(start, end);
         return new DataView(slice);
     }
     async get(): Promise<number> {
@@ -166,7 +180,7 @@ class WzPackage {
                 directory.set(name, await this.loadDirectory());
                 this.archive.position = originalPosition;
             } else if (id == 4) {
-                directory.set(name, new WzImage(this.archive.clone(position)))
+                directory.set(name, new WzImage(this.archive.clone(position)));
             }
         }
         return directory;
