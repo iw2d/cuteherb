@@ -16,6 +16,13 @@ class WzArchive {
         this.windowStart = 0;
         this.windowEnd = 0;
     }
+    clone(begin: number, position: number): WzArchive {
+        const archive = new WzArchive(this.file, begin, position);
+        archive.window = this.window;
+        archive.windowStart = this.windowStart;
+        archive.windowEnd = this.windowEnd;
+        return archive;
+    }
     async slice(start: number, end: number): Promise<ArrayBuffer> {
         if (this.windowStart > start || this.windowEnd < end) {
             this.windowStart = start;
@@ -118,6 +125,31 @@ class WzArchive {
     }
 }
 
+export abstract class WzCollection {
+    archive: WzArchive;
+
+    constructor(archive: WzArchive) {
+        this.archive = archive;
+    }
+    async get(path: string) : Promise<unknown> {
+        const i = path.indexOf("/");
+        const key = i >= 0 ? path.slice(0, i) : path;
+        if (!key) {
+            return this;
+        }
+        const rest = i >= 0 ? path.slice(i + 1) : "";
+        return this.getInternal(key, rest);
+    }
+    abstract getInternal(key: string, rest: string): Promise<unknown>;
+}
+
+export class WzImage extends WzCollection {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    override async getInternal(key: string, rest: string): Promise<unknown> {
+        throw new Error("Method not implemented.");
+    }
+}
+
 function rotl(i: number, n: number): number {
     return (i << n) | (i >>> (32 - n));
 }
@@ -127,13 +159,12 @@ interface WzPackageItem {
     directory: boolean;
 }
 
-export class WzPackage {
-    archive: WzArchive;
+export class WzPackage extends WzCollection {
     items: Map<string, WzPackageItem>;
     key: number;
 
     constructor(archive: WzArchive) {
-        this.archive = archive;
+        super(archive);
         this.items = new Map<string, WzPackageItem>();
         this.key = 0;
     }
@@ -180,6 +211,31 @@ export class WzPackage {
                 position: await this.loadPosition(),
                 directory: (id & 1) != 0
             });
+        }
+    }
+    override async getInternal(key: string, rest: string): Promise<unknown> {
+        const item = this.items.get(key);
+        if (!item) {
+            throw new Error(`No item with key : ${key}`);
+        }
+        if (item.directory) {
+            const subArchive = this.archive.clone(this.archive.begin, item.position);
+            const subPackage = new WzPackage(subArchive);
+            subPackage.key = this.key;
+            await subPackage.loadDirectory();
+            if (rest) {
+                return await subPackage.get(rest);
+            } else {
+                return subPackage;
+            }
+        } else {
+            const subArchive = this.archive.clone(item.position, item.position);
+            const image = new WzImage(subArchive);
+            if (rest) {
+                return await image.get(rest);
+            } else {
+                return image;
+            }
         }
     }
     static from(file: File): WzPackage {
