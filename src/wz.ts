@@ -4,6 +4,7 @@ class WzArchive {
     file: File;
     begin: number;
     position: number;
+    strings: Map<number, string>;
     window: ArrayBuffer;
     windowStart: number;
     windowEnd: number;
@@ -12,6 +13,7 @@ class WzArchive {
         this.file = file;
         this.begin = begin;
         this.position = position;
+        this.strings = new Map<number, string>();
         this.window = new ArrayBuffer();
         this.windowStart = 0;
         this.windowEnd = 0;
@@ -140,13 +142,18 @@ class WzArchive {
     async deserializeStringInternal(offset: boolean): Promise<string> {
         if (offset) {
             const stringPosition = await this.u32();
+            const cached = this.strings.get(stringPosition);
+            if (cached) {
+                return cached;
+            }
             const originalPosition = this.position;
             this.position = this.begin + stringPosition;
             const result = await this.decodeString();
+            this.strings.set(stringPosition, result);
             this.position = originalPosition;
             return result;
         } else {
-            return await this.decodeString(); // TODO caching
+            return await this.decodeString();
         }
     }
 }
@@ -320,8 +327,8 @@ export class WzPackage extends WzCollection {
             throw new Error(`No item with key : ${key}`);
         }
         if (item.directory) {
-            const subArchive = this.archive.clone(this.archive.begin, item.position);
-            const subPackage = new WzPackage(subArchive);
+            this.archive.position = item.position;
+            const subPackage = new WzPackage(this.archive);
             subPackage.key = this.key;
             await subPackage.loadDirectory();
             if (rest) {
