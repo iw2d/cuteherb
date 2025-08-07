@@ -1,4 +1,5 @@
 import { decryptAscii, decryptUtf16 } from "./crypto";
+import { type WzSerialize, WzCanvas, WzConvex, WzProperty, WzSound, WzUol, WzVector } from "./serialize";
 
 export class WzArchive {
     file: File;
@@ -157,6 +158,24 @@ export class WzArchive {
             return result;
         } else {
             return await this.decodeString();
+        }
+    }
+    async deserializeObject(): Promise<WzSerialize> {
+        const type = await this.deserializeString();
+        if (type === "Property") {
+            return await WzProperty.deserialize(this);
+        } else if (type === "Canvas") {
+            return await WzCanvas.deserialize(this);
+        } else if (type === "Shape2D#Vector2D") {
+            return await WzVector.deserialize(this);
+        } else if (type === "Shape2D#Convex2D") {
+            return await WzConvex.deserialize(this);
+        } else if (type === "Sound_DX8") {
+            return await WzSound.deserialize(this);
+        } else if (type === "UOL") {
+            return await WzUol.deserialize(this);
+        } else {
+            throw new Error(`Unknown property type : ${type}`);
         }
     }
 }
