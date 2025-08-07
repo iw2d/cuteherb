@@ -25,11 +25,14 @@ export class WzArchive {
         archive.windowEnd = this.windowEnd;
         return archive;
     }
+    blob(start: number, end: number): Blob {
+        return this.file.slice(start, end);
+    }
     async slice(start: number, end: number): Promise<ArrayBuffer> {
         if (this.windowStart > start || this.windowEnd < end) {
             this.windowStart = start;
             this.windowEnd = Math.max(end, start + 0x1000);
-            this.window = await this.file.slice(this.windowStart, this.windowEnd).arrayBuffer();
+            this.window = await this.blob(this.windowStart, this.windowEnd).arrayBuffer();
         }
         return this.window.slice(start - this.windowStart, end - this.windowStart);
     }
@@ -83,10 +86,10 @@ export class WzArchive {
     }
     async read(): Promise<number> {
         const view = await this.view(this.position, ++this.position + 4);
-        const result = view.getUint8(0);
-        if (result === 0x80) {
+        const result = view.getInt8(0);
+        if (result === -0x80) {
             this.position += 4;
-            return view.getUint32(1, true);
+            return view.getInt32(1, true);
         } else {
             return result;
         }

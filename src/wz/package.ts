@@ -1,6 +1,6 @@
 import { WzArchive } from "./archive";
 import { WzCollection } from "./collection";
-import { WzProperty } from "./property";
+import { WzSerialize } from "./serialize";
 
 function rotateLeft(i: number, n: number): number {
     return (i << n) | (i >>> (32 - n));
@@ -83,7 +83,7 @@ export class WzPackage extends WzCollection {
             }
         } else {
             const subArchive = this.archive.clone(item.position, item.position);
-            const subProperty = await WzProperty.deserialize(subArchive);
+            const subProperty = await WzSerialize.deserialize(subArchive); // WzProperty
             if (rest) {
                 return await subProperty.get(rest);
             } else {
