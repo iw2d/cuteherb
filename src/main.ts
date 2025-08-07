@@ -16,7 +16,7 @@ input.addEventListener("change", async (event) => {
         console.log(`Async execution took ${(performance.now() - start).toFixed(3)} ms`);
         console.log(p);
         start = performance.now();
-        console.log(await p.get("Map/Map1/120020272.img/info"));
+        console.log(await p.get("Map/Map1/120020272.img/info/autoLieDetector"));
         console.log(`Async execution took ${(performance.now() - start).toFixed(3)} ms`);
     } catch (error) {
         console.log(error);
