@@ -2,14 +2,14 @@ import { decryptAscii, decryptUtf16 } from "./crypto";
 import { type WzSerialize, WzCanvas, WzConvex, WzProperty, WzSound, WzUol, WzVector } from "./serialize";
 
 export class WzArchive {
-    file: File;
+    file: Blob;
     begin: number;
     position: number;
     window: ArrayBuffer;
     windowStart: number;
     windowEnd: number;
 
-    constructor(file: File, begin: number, position: number) {
+    constructor(file: Blob, begin: number, position: number) {
         this.file = file;
         this.begin = begin;
         this.position = position;
@@ -107,10 +107,7 @@ export class WzArchive {
                 throw new Error("Unsupported string length");
             }
             if (length > 0) {
-                const data = await this.array(
-                    this.position,
-                    (this.position += length)
-                );
+                const data = await this.array(this.position, this.position += length);
                 return decryptAscii(data);
             }
         } else if (length > 0) {
@@ -122,10 +119,7 @@ export class WzArchive {
                 throw new Error("Unsupported string length");
             }
             if (length > 0) {
-                const data = await this.array(
-                    this.position,
-                    (this.position += length * 2)
-                );
+                const data = await this.array(this.position, this.position += length * 2);
                 return decryptUtf16(data);
             }
         }

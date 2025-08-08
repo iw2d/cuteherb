@@ -1,5 +1,6 @@
 import { WzArchive } from "./archive";
 import { type WzCollectionEntry, WzCollection } from "./collection";
+import { decryptData } from "./crypto";
 
 interface WzPropertyItem {
     position: number;
@@ -97,6 +98,15 @@ export class WzProperty extends WzCollection {
     }
 }
 
+export const CANVAS_PIXFORMAT = {
+    UNKNOWN: 0,
+    ARGB4444: 1,
+    ARGB8888: 2,
+    RGB565: 0x201,
+    DXT3: 0x402,
+    DXT5: 0x802,
+} as const;
+
 export class WzCanvas extends WzCollection {
     property: WzProperty;
     width: number;
@@ -127,16 +137,58 @@ export class WzCanvas extends WzCollection {
         // canvas meta
         const width = await archive.read();
         const height = await archive.read();
+        if (width >= 0x10000 || height >= 0x10000) {
+            throw new Error(`Unsupported canvas dimensions : ${width} x ${height}`);
+        }
         const pixFormat = await archive.read();
+        if (pixFormat !== CANVAS_PIXFORMAT.ARGB4444 && pixFormat !== CANVAS_PIXFORMAT.ARGB8888 &&
+            pixFormat !== CANVAS_PIXFORMAT.RGB565 && pixFormat !== CANVAS_PIXFORMAT.DXT3) {
+            throw new Error(`Unsupported canvas pixFormat : ${pixFormat}`);
+        }
         const magLevel = await archive.read();
+        if (magLevel < 0) {
+            throw new Error(`Unsupported canvas magLevel : ${magLevel}`);
+        }
         for (let i = 0; i < 4; i++) {
             await archive.read();
         }
         // canvas data
-        const dataSize = await archive.u32() - 1;
-        archive.position += 1;
-        const data = archive.blob(archive.position, archive.position += dataSize);
-        return new WzCanvas(property, width, height, pixFormat, magLevel, data);
+        const chunks: Uint8Array<ArrayBuffer>[] = [];
+        const writable = new WritableStream<Uint8Array<ArrayBuffer>>({
+            write(chunk) {
+                chunks.push(chunk);
+            }
+        });
+        const size = await archive.u32() - 1;
+        archive.position += 1; // 0
+        const header = await archive.u16();
+        archive.position -= 2;
+        // TODO: clean up + try fflate?
+        try {
+            if (header === 0x9C78) {
+                await archive.blob(archive.position, archive.position += size).stream()
+                    .pipeThrough(new DecompressionStream("deflate"))
+                    .pipeTo(writable);
+
+            } else {
+                const decrypted = [];
+                const endPosition = archive.position + size;
+                while (archive.position < endPosition) {
+                    const chunkSize = await archive.u32();
+                    const chunkData = await archive.array(archive.position, archive.position += chunkSize);
+                    decrypted.push(await decryptData(chunkData));
+                }
+                await new Blob(decrypted as BlobPart[]).stream()
+                    .pipeThrough(new DecompressionStream("deflate"))
+                    .pipeTo(writable);
+            }
+        } catch (error) {
+            console.log(error);
+            if (!(error instanceof TypeError)) {
+                throw error;
+            }
+        }
+        return new WzCanvas(property, width, height, pixFormat, magLevel, new Blob(chunks));
     }
 }
 

@@ -25,9 +25,24 @@ async function createCipher(userKey: Uint8Array, userIv: Uint8Array, size: numbe
     return new Uint8Array(cipher);
 }
 
-const cipher = await createCipher(AES_USER_KEY, WZ_GMS_IV, 0x2000);
+let cipher = await createCipher(AES_USER_KEY, WZ_GMS_IV, 0x2000);
 const decoderAscii = new TextDecoder("ascii");
 const decoderUtf16 = new TextDecoder("utf-16le");
+
+export async function decryptData(data: Uint8Array): Promise<Uint8Array> {
+    const result = new Uint8Array(data.length);
+    if (data.length > cipher.length) {
+        let newSize = cipher.length;
+        while (newSize < data.length) {
+            newSize = newSize * 2;
+        }
+        cipher = await createCipher(AES_USER_KEY, WZ_GMS_IV, newSize);
+    }
+    for (let i = 0; i < data.length; i++) {
+        result[i] = (data[i] ^ cipher[i]) & 0xFF;
+    }
+    return result;
+}
 
 export function decryptAscii(data: Uint8Array): string {
     const result = new Uint8Array(data.length);
