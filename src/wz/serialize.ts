@@ -1,5 +1,5 @@
 import { WzArchive } from "./archive";
-import { WzCollection } from "./collection";
+import { type WzCollectionEntry, WzCollection } from "./collection";
 
 interface WzPropertyItem {
     position: number;
@@ -19,7 +19,7 @@ export class WzProperty extends WzCollection {
         if (item === undefined) {
             throw new Error(`No item with key : ${key}`);
         }
-        if (typeof item !== "object") {
+        if (item === null || typeof item !== "object") {
             if (rest) {
                 throw new Error(`Cannot index list item with type : ${typeof item}`);
             }
@@ -33,52 +33,65 @@ export class WzProperty extends WzCollection {
             return result;
         }
     }
+    override async collect(): Promise<WzCollectionEntry[]> {
+        const result: WzCollectionEntry[] = [];
+        for (const [key] of this.items) {
+            const value = await this.getInternal(key, "");
+            result.push({
+                name: key,
+                value: value,
+                collection: value instanceof WzCollection
+            });
+        }
+        return result;
+    }
     static async deserializeVariant(archive: WzArchive): Promise<unknown> {
-        const vt = await archive.u8();
-        if (vt === 0) {
+        const type = await archive.u8();
+        if (type === 0) {
             return null;
-        } else if (vt === 2 || vt === 16) {
+        } else if (type === 2 || type === 16) {
             return await archive.i16();
-        } else if (vt === 3) {
-            const val = await archive.i8();
-            return val === -0x80 ? await archive.i32() : val;
-        } else if (vt === 4) {
-            const val = await archive.i8();
-            return val === -0x80 ? await archive.f32() : val;
-        } else if (vt === 5) {
+        } else if (type === 3) {
+            const value = await archive.i8();
+            return value === -0x80 ? await archive.i32() : value;
+        } else if (type === 4) {
+            const value = await archive.i8();
+            return value === -0x80 ? await archive.f32() : value;
+        } else if (type === 5) {
             return await archive.f64();
-        } else if (vt === 8) {
+        } else if (type === 8) {
             return await archive.deserializeString();
-        } else if (vt === 9 || vt === 13) {
+        } else if (type === 9 || type === 13) {
             const size = await archive.u32();
             const position = archive.position;
             archive.position += size;
             return { position: position } as WzPropertyItem;
-        } else if (vt === 11) {
-            const val = await archive.u16();
-            return val ? true : false;
-        } else if (vt === 17 || vt === 18) {
+        } else if (type === 11) {
+            const value = await archive.u16();
+            return value ? true : false;
+        } else if (type === 17 || type === 18) {
             return await archive.u16();
-        } else if (vt === 19) {
-            const val = await archive.u8();
-            return val === 0x80 ? await archive.u32() : val;
-        } else if (vt === 20) {
-            const val = await archive.i8();
-            return val === -0x80 ? await archive.i64() : BigInt(val);
-        } else if (vt === 21) {
-            const val = await archive.u8();
-            return val === 0x80 ? await archive.u64() : BigInt(val);
+        } else if (type === 19) {
+            const value = await archive.u8();
+            return value === 0x80 ? await archive.u32() : value;
+        } else if (type === 20) {
+            const value = await archive.i8();
+            return value === -0x80 ? await archive.i64() : BigInt(value);
+        } else if (type === 21) {
+            const value = await archive.u8();
+            return value === 0x80 ? await archive.u64() : BigInt(value);
         } else {
-            throw new Error(`Unknown variant type ${vt}`);
+            throw new Error(`Unknown variant type ${type}`);
         }
     }
     static async deserialize(archive: WzArchive): Promise<WzProperty> {
-        const result = new WzProperty(archive);
-        archive.position += 2; // reserved
+        const result = new WzProperty(archive.clone(archive.begin, archive.position));
+        archive.position = archive.position + 2; // reserved
         const size = await archive.read();
         for (let i = 0; i < size; i++) {
-            const name = await archive.deserializeString();
-            result.items.set(name, await WzProperty.deserializeVariant(archive));
+            const key = await archive.deserializeString();
+            const value = await WzProperty.deserializeVariant(archive);
+            result.items.set(key, value);
         }
         return result;
     }
@@ -103,6 +116,9 @@ export class WzCanvas extends WzCollection {
     }
     override async getInternal(key: string, rest: string): Promise<unknown> {
         return await this.property.getInternal(key, rest);
+    }
+    override async collect(): Promise<WzCollectionEntry[]> {
+        return await this.property.collect();
     }
     static async deserialize(archive: WzArchive): Promise<WzCanvas> {
         archive.position += 1;

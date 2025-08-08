@@ -10,22 +10,22 @@ const AES_USER_KEY = new Uint8Array([
 ]);
 const WZ_GMS_IV = new Uint8Array([0x4D, 0x23, 0xC7, 0x2B]);
 
-async function createCipher(size: number): Promise<Uint8Array> {
+async function createCipher(userKey: Uint8Array, userIv: Uint8Array, size: number): Promise<Uint8Array> {
     const data = new Uint8Array(32);
     for (let i = 0; i < 128; i += 16) {
-        data[i / 4] = AES_USER_KEY[i];
+        data[i / 4] = userKey[i];
     }
     const key = await crypto.subtle.importKey("raw", data, { name: "AES-CBC" }, false, ["encrypt"]);
     const iv = new Uint8Array(16);
     for (let i = 0; i < 16; i += 4) {
-        iv.set(WZ_GMS_IV, i);
+        iv.set(userIv, i);
     }
     const input = new Uint8Array(size);
     const cipher = await crypto.subtle.encrypt({ name: "AES-CBC", iv: iv }, key, input);
     return new Uint8Array(cipher);
 }
 
-const cipher = await createCipher(0x2000);
+const cipher = await createCipher(AES_USER_KEY, WZ_GMS_IV, 0x2000);
 const decoderAscii = new TextDecoder("ascii");
 const decoderUtf16 = new TextDecoder("utf-16le");
 
@@ -44,7 +44,7 @@ export function decryptUtf16(data: Uint8Array): string {
     let mask = 0xAAAA;
     for (let i = 0; i < data.length; i += 2) {
         result[i] = (data[i] ^ cipher[i] ^ (mask & 0xFF)) & 0xFF;
-        result[i + 1] = (data[i + 1] ^ cipher[i + 1] ^ ((mask >> 8) & 0xFF)) & 0xFF;
+        result[i + 1] = (data[i + 1] ^ cipher[i + 1] ^ (mask >> 8)) & 0xFF;
         mask = (mask + 1) & 0xFFFF;
     }
     return decoderUtf16.decode(result);

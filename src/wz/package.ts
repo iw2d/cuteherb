@@ -1,5 +1,5 @@
 import { WzArchive } from "./archive";
-import { WzCollection } from "./collection";
+import { type WzCollectionEntry, WzCollection } from "./collection";
 import { type WzProperty } from "./serialize";
 
 function rotateLeft(i: number, n: number): number {
@@ -56,13 +56,25 @@ export class WzPackage extends WzCollection {
     async loadDirectory(): Promise<void> {
         const size = await this.archive.read();
         for (let i = 0; i < size; i++) {
-            const id = await this.archive.u8();
-            const name = await this.archive.deserializeStringInternal(id <= 2);
+            let type = await this.archive.u8();
+            let name;
+            if (type === 2) {
+                const stringPosition = await this.archive.u32();
+                const originalPosition = this.archive.position;
+                this.archive.position = this.archive.begin + stringPosition;
+                type = await this.archive.u8();
+                name = await this.archive.decodeString();
+                this.archive.position = originalPosition;
+            } else if (type === 3 || type === 4) {
+                name = await this.archive.decodeString();
+            } else {
+                throw new Error(`Unknown directory item type : ${type}`);
+            }
             await this.archive.read(); // size
             await this.archive.read(); // checksum
             this.items.set(name, {
                 position: await this.loadPosition(),
-                directory: (id & 1) !== 0
+                directory: (type & 1) !== 0
             });
         }
     }
@@ -72,8 +84,8 @@ export class WzPackage extends WzCollection {
             throw new Error(`No item with key : ${key}`);
         }
         if (item.directory) {
-            this.archive.position = item.position;
-            const subPackage = new WzPackage(this.archive);
+            const subArchive = this.archive.clone(this.archive.begin, item.position);
+            const subPackage = new WzPackage(subArchive);
             subPackage.key = this.key;
             await subPackage.loadDirectory();
             if (rest) {
@@ -90,6 +102,18 @@ export class WzPackage extends WzCollection {
                 return subProperty;
             }
         }
+    }
+    override async collect(): Promise<WzCollectionEntry[]> {
+        const result: WzCollectionEntry[] = [];
+        for (const [key] of this.items) {
+            const value = await this.getInternal(key, "");
+            result.push({
+                name: key,
+                value: value,
+                collection: value instanceof WzCollection
+            });
+        }
+        return result;
     }
     static async from(file: File, key: string): Promise<WzPackage> {
         const result = new WzPackage(new WzArchive(file, 0, 0));

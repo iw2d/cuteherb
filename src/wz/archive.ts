@@ -5,7 +5,6 @@ export class WzArchive {
     file: File;
     begin: number;
     position: number;
-    strings: Map<number, string>;
     window: ArrayBuffer;
     windowStart: number;
     windowEnd: number;
@@ -14,7 +13,6 @@ export class WzArchive {
         this.file = file;
         this.begin = begin;
         this.position = position;
-        this.strings = new Map<number, string>();
         this.window = new ArrayBuffer();
         this.windowStart = 0;
         this.windowEnd = 0;
@@ -146,14 +144,9 @@ export class WzArchive {
     async deserializeStringInternal(offset: boolean): Promise<string> {
         if (offset) {
             const stringPosition = await this.u32();
-            const cached = this.strings.get(stringPosition);
-            if (cached) {
-                return cached;
-            }
             const originalPosition = this.position;
             this.position = this.begin + stringPosition;
             const result = await this.decodeString();
-            this.strings.set(stringPosition, result);
             this.position = originalPosition;
             return result;
         } else {
