@@ -1,24 +1,5 @@
 import { WzCanvas, WzPackage } from "./wz";
 
-async function convertARGB4444(blob: Blob): Promise<Uint8Array<ArrayBuffer>> {
-    const pixels = new Uint16Array(await blob.arrayBuffer()); // 2 bytes per pixel
-    const result = new Uint8Array(pixels.length * 4);
-    for (let i = 0; i < result.length; i += 4) {
-        const pixel = pixels[i / 4];
-
-        const a4 = (pixel >> 12) & 0xF;
-        const r4 = (pixel >> 8) & 0xF;
-        const g4 = (pixel >> 4) & 0xF;
-        const b4 = pixel & 0xF;
-
-        result[i] = r4 * 17;
-        result[i + 1] = g4 * 17;
-        result[i + 2] = b4 * 17;
-        result[i + 3] = a4 * 17;
-    }
-    return result;
-}
-
 (async () => {
     const adapter = await navigator.gpu?.requestAdapter();
     const device = await adapter?.requestDevice();
@@ -112,17 +93,16 @@ struct OurVertexShaderOutput {
             height: source.height,
             depthOrArrayLayers: 1,
         };
-        const pixels = await convertARGB4444(source.data);
         const texture = device.createTexture({
-            format: "rgba8unorm",
             size: size,
+            format: format,
             usage: GPUTextureUsage.TEXTURE_BINDING |
                 GPUTextureUsage.COPY_DST |
                 GPUTextureUsage.RENDER_ATTACHMENT,
         });
         device.queue.writeTexture(
             { texture },
-            pixels,
+            source.bitmap.buffer,
             {
                 bytesPerRow: source.width * 4,
                 rowsPerImage: source.height,

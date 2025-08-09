@@ -1,47 +1,40 @@
 import { decryptAscii, decryptUtf16 } from "./crypto";
-import { type WzSerialize, WzCanvas, WzConvex, WzProperty, WzSound, WzUol, WzVector } from "./serialize";
 
 export class WzArchive {
     file: Blob;
     begin: number;
     position: number;
-    window: ArrayBuffer;
-    windowStart: number;
-    windowEnd: number;
+    window: Uint8Array;
+    windowPosition: number;
 
     constructor(file: Blob, begin: number, position: number) {
         this.file = file;
         this.begin = begin;
         this.position = position;
-        this.window = new ArrayBuffer();
-        this.windowStart = 0;
-        this.windowEnd = 0;
+        this.window = new Uint8Array();
+        this.windowPosition = 0;
     }
     clone(begin: number, position: number): WzArchive {
         const archive = new WzArchive(this.file, begin, position);
         archive.window = this.window;
-        archive.windowStart = this.windowStart;
-        archive.windowEnd = this.windowEnd;
+        archive.windowPosition = this.windowPosition;
         return archive;
     }
     blob(start: number, end: number): Blob {
         return this.file.slice(start, end);
     }
-    async slice(start: number, end: number): Promise<ArrayBuffer> {
-        if (this.windowStart > start || this.windowEnd < end) {
-            this.windowStart = start;
-            this.windowEnd = Math.max(end, start + 0x1000);
-            this.window = await this.blob(this.windowStart, this.windowEnd).arrayBuffer();
-        }
-        return this.window.slice(start - this.windowStart, end - this.windowStart);
-    }
     async array(start: number, end: number): Promise<Uint8Array> {
-        const slice = await this.slice(start, end);
-        return new Uint8Array(slice);
+        if (this.windowPosition > start || this.windowPosition + this.window.length < end) {
+            this.windowPosition = start;
+            const windowEnd = Math.max(this.windowPosition + 0x1000, end);
+            const windowBuffer = await this.blob(this.windowPosition, windowEnd).arrayBuffer();
+            this.window = new Uint8Array(windowBuffer);
+        }
+        return this.window.subarray(start - this.windowPosition, end - this.windowPosition);
     }
     async view(start: number, end: number): Promise<DataView> {
-        const slice = await this.slice(start, end);
-        return new DataView(slice);
+        const array = await this.array(start, end);
+        return new DataView(array.buffer, array.byteOffset, array.byteLength);
     }
     async u8(): Promise<number> {
         const view = await this.view(this.position, ++this.position);
@@ -145,24 +138,6 @@ export class WzArchive {
             return result;
         } else {
             return await this.decodeString();
-        }
-    }
-    async deserializeObject(): Promise<WzSerialize> {
-        const type = await this.deserializeString();
-        if (type === "Property") {
-            return await WzProperty.deserialize(this);
-        } else if (type === "Canvas") {
-            return await WzCanvas.deserialize(this);
-        } else if (type === "Shape2D#Vector2D") {
-            return await WzVector.deserialize(this);
-        } else if (type === "Shape2D#Convex2D") {
-            return await WzConvex.deserialize(this);
-        } else if (type === "Sound_DX8") {
-            return await WzSound.deserialize(this);
-        } else if (type === "UOL") {
-            return await WzUol.deserialize(this);
-        } else {
-            throw new Error(`Unknown property type : ${type}`);
         }
     }
 }
